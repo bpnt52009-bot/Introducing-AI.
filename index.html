@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMI OS - PROTOCOL V1.6 (DYNAMIC MEDIA CORE)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #02060c;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #webcam {
+            position: absolute;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            object-fit: cover;
+            transform: rotateY(180deg);
+            z-index: 1;
+            filter: brightness(0.55) contrast(1.05);
+        }
+        canvas {
+            position: absolute;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 3;
+            pointer-events: none;
+        }
+        #hud-grid-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background-image: 
+                linear-gradient(rgba(0, 229, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 229, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+            z-index: 2;
+            pointer-events: none;
+        }
+        #control-panel {
+            position: absolute;
+            top: 30px; left: 30px;
+            background: rgba(4, 15, 30, 0.85);
+            padding: 18px 25px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 0, 128, 0.3);
+            box-shadow: 0 0 25px rgba(0, 229, 255, 0.2), inset 0 0 10px rgba(0, 229, 255, 0.1);
+            z-index: 100;
+            color: #00e5ff;
+            letter-spacing: 1px;
+            backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #upload-btn {
+            background: rgba(255, 0, 128, 0.1); color: #ff0080; border: 1px solid #ff0080;
+            padding: 8px 18px; cursor: pointer; font-weight: bold;
+            border-radius: 4px; transition: all 0.3s; font-size: 11px; text-transform: uppercase;
+        }
+        #upload-btn:hover {
+            background: rgba(0, 229, 255, 0.2); box-shadow: 0 0 15px #00e5ff; color: #fff; border-color: #00e5ff;
+        }
+        
+        /* 💡 ช่องกรอกลิงก์สไตล์ไซไฟล้ำๆ */
+        #media-url-input {
+            background: rgba(0, 229, 255, 0.05);
+            border: 1px solid rgba(0, 229, 255, 0.4);
+            padding: 8px 12px;
+            color: #fff;
+            font-size: 11px;
+            border-radius: 4px;
+            outline: none;
+            width: 230px;
+            transition: all 0.3s;
+        }
+        #media-url-input:focus {
+            border-color: #ff0080;
+            box-shadow: 0 0 10px rgba(255, 0, 128, 0.3);
+            background: rgba(255, 0, 128, 0.05);
+        }
+        
+        #status-text {
+            color: #00ffcc; font-size: 11px; margin-top: 5px; white-space: pre-line; line-height: 1.5;
+        }
+        #loading-container {
+            position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+            width: 450px; background: rgba(5, 10, 25, 0.95); border: 1px solid #ff0080;
+            padding: 15px; border-radius: 6px; z-index: 101; display: none; text-align: center;
+            box-shadow: 0 0 30px rgba(255, 0, 128, 0.4); backdrop-filter: blur(8px);
+        }
+        #loading-bar { width: 0%; height: 14px; background: linear-gradient(90deg, #ff0080, #00e5ff); margin-top: 8px; border-radius: 2px; }
+        #loading-text { color: #ff0080; font-size: 13px; font-weight: bold; letter-spacing: 2px; }
+        
+        #youtube-wrapper {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0);
+            width: 75vw; height: 42.18vw; max-width: 960px; max-height: 540px; z-index: 500;
+            border: 2px solid #ff0080; box-shadow: 0 0 40px rgba(255, 0, 128, 0.5);
+            background: #000; transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.15); border-radius: 8px; overflow: hidden;
+        }
+        #youtube-wrapper.active { transform: translate(-50%, -50%) scale(1); }
+        
+        #voice-indicator {
+            position: absolute; top: 30px; right: 30px; background: rgba(4, 15, 30, 0.85);
+            border: 1px solid #00ffcc; padding: 12px 20px; color: #00ffcc; font-weight: bold; font-size: 12px; z-index: 100; border-radius: 6px;
+        }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="hud-grid-overlay"></div>
+
+    <div id="control-panel">
+        <div style="font-size: 16px; font-weight: bold; color: #ffffff; text-shadow: 0 0 10px rgba(255,0,128,0.5);">A.M.I. // DYNAMIC OS</div>
+        <input type="file" id="image-input" accept="image/*" multiple style="display:none;">
+        <button id="upload-btn" onclick="document.getElementById('image-input').click()">[ LOAD HOLO-IMAGES ]</button>
+        
+        <input type="text" id="media-url-input" placeholder="วางลิงก์ YouTube ที่นี่..." value="https://www.youtube.com/watch?v=rLYVj8X0DIs">
+        
+        <div id="status-text">AMI_SYSTEM: READY ค่ะ\nพูด: "อามิ เปิดเพลง" หรือ "อามิ ปิด"</div>
+    </div>
+
+    <div id="voice-indicator">💖 AMI: STANDBY (คลิกหน้าจอเพื่อเปิดไมค์นะคะ)</div>
+
+    <div id="youtube-wrapper">
+        <iframe id="ami-player" width="100%" height="100%" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    </div>
+
+    <div id="loading-container">
+        <div id="loading-text">SYNCING COMMAND PROTOCOL...</div>
+        <div style="width: 100%; background: rgba(255,255,255,0.05); margin-top:8px;">
+            <div id="loading-bar"></div>
+        </div>
+    </div>
+
+    <video id="webcam" autoplay playsinline></video>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const imageInput = document.getElementById('image-input');
+        const statusText = document.getElementById('status-text');
+        const voiceIndicator = document.getElementById('voice-indicator');
+        const youtubeWrapper = document.getElementById('youtube-wrapper');
+        const amiPlayer = document.getElementById('ami-player');
+        const mediaUrlInput = document.getElementById('media-url-input');
+        
+        const loadingContainer = document.getElementById('loading-container');
+        const loadingBar = document.getElementById('loading-bar');
+        const loadingText = document.getElementById('loading-text');
+
+        let slideTextures = [];
+        let currentSlideIndex = 0;
+        let isSlideLock = false;
+        let isYoutubeActive = false;
+
+        let zoneStartTime = null; let activeZone = null; 
+        const HOLD_TARGET_TIME = 5000; let lastSpokenSecond = 5;
+
+        // 🛠️ ฟังก์ชันถอดรหัสลับ Extract Video ID จากลิงก์ YouTube ได้ทุกรูปแบบ
+        function getYouTubeId(url) {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length === 11) ? match[2] : "rLYVj8X0DIs"; // ถ้าลิงก์เพี้ยนให้ดีดกลับมาที่เพลงคุกเข่า
+        }
+
+        function amiSpeak(text) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voices = window.speechSynthesis.getVoices();
+            const femaleVoice = voices.find(v => v.name.includes("Google US English") || v.name.includes("Female") || v.name.includes("Zira"));
+            if (femaleVoice) utterance.voice = femaleVoice;
+            utterance.lang = 'en-US'; utterance.rate = 1.1; utterance.pitch = 1.2;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // ==========================================
+        // 🔊 ระบบคำสั่งเสียงควบคุมสื่อมีเดีย
+        // ==========================================
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'th-TH';
+
+            recognition.onstart = () => { voiceIndicator.innerText = "💖 AMI: LISTENING NOW ค่ะ"; voiceIndicator.style.color = "#00ffcc"; };
+            recognition.onend = () => { recognition.start(); }; 
+
+            recognition.onresult = (event) => {
+                const resultIndex = event.resultIndex;
+                const transcript = event.results[resultIndex][0].transcript.toLowerCase().trim();
+                console.log("Ami Heard:", transcript);
+                
+                if (transcript.includes("ami") || transcript.includes("อามิ")) {
+                    if (transcript.includes("เปิดเพลง") || transcript.includes("เปิด")) {
+                        voiceIndicator.innerText = `🌸 AMI: LINK MONITOR ENGAGED`;
+                        voiceIndicator.style.color = "#ff0080";
+                        openMediaMonitor();
+                    }
+                    if (transcript.includes("ปิด") || transcript.includes("หยุด") || transcript.includes("close")) {
+                        closeMediaMonitor();
+                    }
+                }
+            };
+            
+            document.body.addEventListener('click', () => { 
+                audioCtx.resume(); 
+                recognition.start(); 
+                amiSpeak("Ami dynamic system ready.");
+            }, { once: true });
+        }
+
+        function openMediaMonitor() {
+            if (isYoutubeActive) return;
+            amiSpeak("Opening customized media window.");
+            isYoutubeActive = true;
+            
+            // ดึงลิงก์จากหน้าจอมาแปลงค่าไอดีสดๆ ร้อนๆ
+            const userUrl = mediaUrlInput.value.trim();
+            const videoId = getYouTubeId(userUrl);
+            
+            amiPlayer.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&controls=1&modestbranding=1`;
+            
+            youtubeWrapper.classList.add('active');
+            targetScale = 0.15;
+        }
+
+        function closeMediaMonitor() {
+            if (!isYoutubeActive) return;
+            isYoutubeActive = false;
+            youtubeWrapper.classList.remove('active');
+            amiPlayer.src = ""; 
+            targetScale = 1.0; 
+            voiceIndicator.innerText = "💖 AMI: STANDBY (พร้อมรับคำสั่งค่ะ)";
+            voiceIndicator.style.color = "#00ffcc";
+            amiSpeak("Monitor deactivated.");
+        }
+
+        // ==========================================
+        // AUDIO FX SYSTEM
+        // ==========================================
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let humOsc = null, humGain = null;
+        function startHum() {
+            if (humOsc) return; humOsc = audioCtx.createOscillator(); humGain = audioCtx.createGain();
+            humOsc.type = 'sine'; humOsc.frequency.setValueAtTime(60, audioCtx.currentTime); humGain.gain.setValueAtTime(0.006, audioCtx.currentTime);
+            const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.setValueAtTime(140, audioCtx.currentTime);
+            humOsc.connect(filter); filter.connect(humGain); humGain.connect(audioCtx.destination); humOsc.start();
+        }
+        function updateHum(speed) { if (humOsc && humGain) { humOsc.frequency.setTargetAtTime(60 + speed * 110, audioCtx.currentTime, 0.1); humGain.gain.setTargetAtTime(Math.min(0.015, speed * 0.02), audioCtx.currentTime, 0.1); } }
+        function stopHum() { if (humOsc) { humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.08); setTimeout(() => { try { humOsc.stop(); } catch(e){} humOsc = null; }, 100); } }
+
+        // ==========================================
+        // THREE.JS HOLOGRAPHIC SYSTEM
+        // ==========================================
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xff00aa, 0.4)); scene.add(new THREE.AmbientLight(0x00e5ff, 0.7)); 
+        const mainGroup = new THREE.Group(); mainGroup.position.set(0, 0.2, 0); scene.add(mainGroup);
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 2.8), new THREE.MeshBasicMaterial({ color: 0x00e5ff, side: THREE.DoubleSide, transparent: true, opacity: 0.35, wireframe: true }));
+        mainGroup.add(mesh);
+        const ringGroup = new THREE.Group(); ringGroup.position.z = -0.2; mainGroup.add(ringGroup);
+        const outerRing = new THREE.Mesh(new THREE.RingGeometry(2.3, 2.35, 40), new THREE.MeshBasicMaterial({ color: 0x0088ff, side: THREE.DoubleSide, wireframe: true }));
+        const innerRing = new THREE.Mesh(new THREE.RingGeometry(1.8, 1.82, 8), new THREE.MeshBasicMaterial({ color: 0xff0080, side: THREE.DoubleSide, wireframe: true }));
+        ringGroup.add(outerRing, innerRing); camera.position.z = 4.5;
+
+        imageInput.addEventListener('change', (e) => {
+            slideTextures = []; currentSlideIndex = 0; const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                files.forEach((file, index) => {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        new THREE.TextureLoader().load(event.target.result, (texture) => {
+                            slideTextures[index] = texture;
+                            if (index === 0) { mesh.material.map = texture; mesh.material.wireframe = false; mesh.material.color.setHex(0xffffff); mesh.material.opacity = 0.9; mesh.material.needsUpdate = true; }
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+        });
+
+        function changeSlide(direction) {
+            if (slideTextures.length <= 1 || isSlideLock) return; isSlideLock = true;
+            currentSlideIndex = direction === 'next' ? (currentSlideIndex + 1) % slideTextures.length : (currentSlideIndex - 1 + slideTextures.length) % slideTextures.length;
+            amiSpeak(direction === 'next' ? "Moving next." : "Moving back.");
+            mesh.material.map = slideTextures[currentSlideIndex]; mesh.material.needsUpdate = true;
+            setTimeout(() => { isSlideLock = false; }, 2000);
+        }
+
+        // ==========================================
+        // HAND CONTROLLER + VFX LOOP
+        // ==========================================
+        let targetRotationX = 0, targetRotationY = 0, targetScale = 1;
+        let isChargingShake = false; let shakeIntensity = 0;
+
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                startHum();
+                if (results.multiHandLandmarks.length >= 2 && !isYoutubeActive) {
+                    const d = Math.sqrt(Math.pow(results.multiHandLandmarks[0][0].x - results.multiHandLandmarks[1][0].x, 2));
+                    targetScale = Math.max(0.4, Math.min(2.5, d * 3.2)); updateHum(0.25); resetLoadingBar();
+                } else if (!isYoutubeActive) {
+                    const wrist = results.multiHandLandmarks[0][0]; const currentTime = Date.now();
+                    if (wrist.x < 0.23) {
+                        if (!isSlideLock && slideTextures.length > 0) {
+                            if (activeZone !== 'right') { activeZone = 'right'; zoneStartTime = currentTime; lastSpokenSecond = 5; loadingContainer.style.display = 'block'; outerRing.material.color.setHex(0xff0080); }
+                            let elapsed = currentTime - zoneStartTime; let progress = Math.min(100, (elapsed / HOLD_TARGET_TIME) * 100);
+                            isChargingShake = true; shakeIntensity = (progress / 100) * 0.08; updateHum(0.2 + (progress/100)*0.4);
+                            let remaining = Math.ceil(5 - (elapsed/1000));
+                            if (remaining < lastSpokenSecond && remaining <= 3 && remaining > 0) { lastSpokenSecond = remaining; amiSpeak(remaining.toString()); }
+                            loadingBar.style.width = `${progress}%`; loadingText.innerText = `AMI IS SWITCHING NEXT... ${remaining.toFixed(1)}s`;
+                            statusText.innerText = `COMMAND: NEXT SLIDE PROTOCOL\nLOADING: [ ${progress.toFixed(0)}% ]`;
+                            if (elapsed >= HOLD_TARGET_TIME) { changeSlide('next'); resetLoadingBar(); }
+                        }
+                    } else if (wrist.x > 0.77) {
+                        if (!isSlideLock && slideTextures.length > 0) {
+                            if (activeZone !== 'left') { activeZone = 'left'; zoneStartTime = currentTime; lastSpokenSecond = 5; loadingContainer.style.display = 'block'; outerRing.material.color.setHex(0x00e5ff); }
+                            let elapsed = currentTime - zoneStartTime; let progress = Math.min(100, (elapsed / HOLD_TARGET_TIME) * 100);
+                            isChargingShake = true; shakeIntensity = (progress / 100) * 0.08; updateHum(0.2 + (progress/100)*0.4);
+                            let remaining = Math.ceil(5 - (elapsed/1000));
+                            if (remaining < lastSpokenSecond && remaining <= 3 && remaining > 0) { lastSpokenSecond = remaining; amiSpeak(remaining.toString()); }
+                            loadingBar.style.width = `${progress}%`; loadingText.innerText = `AMI IS REVERSING DISPLAY... ${remaining.toFixed(1)}s`;
+                            statusText.innerText = `COMMAND: PREV SLIDE PROTOCOL\nLOADING: [ ${progress.toFixed(0)}% ]`;
+                            if (elapsed >= HOLD_TARGET_TIME) { changeSlide('prev'); resetLoadingBar(); }
+                        }
+                    } else {
+                        resetLoadingBar(); targetRotationY = (wrist.x - 0.5) * Math.PI * -1.8; targetRotationX = (wrist.y - 0.5) * Math.PI * -1.3; updateHum(0.08);
+                        statusText.innerText = `AMI: ONLINE ค่ะ\nACTIVE_SLIDE: [ ${currentSlideIndex + 1} / ${slideTextures.length} ]`;
+                    }
+                }
+            } else { stopHum(); resetLoadingBar(); }
+        }
+
+        function resetLoadingBar() {
+            zoneStartTime = null; activeZone = null; isChargingShake = false; shakeIntensity = 0;
+            loadingContainer.style.display = 'none'; loadingBar.style.width = '0%';
+            outerRing.material.color.setHex(0x0088ff);
+        }
+
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.55, minTrackingConfidence: 0.55 });
+        hands.onResults(onResults);
+        new Camera(videoElement, { onFrame: async () => { await hands.send({ image: videoElement }); }, width: 1280, height: 720 }).start();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            mainGroup.rotation.y += (targetRotationY - mainGroup.rotation.y) * 0.07;
+            mainGroup.rotation.x += (targetRotationX - mainGroup.rotation.x) * 0.07;
+            
+            if(!isYoutubeActive) {
+                mainGroup.scale.setScalar(mainGroup.scale.x + (targetScale - mainGroup.scale.x) * 0.08);
+            } else {
+                mainGroup.scale.setScalar(mainGroup.scale.x + (0.15 - mainGroup.scale.x) * 0.08);
+            }
+            
+            outerRing.rotation.z += 0.002; innerRing.rotation.z -= 0.005;
+
+            if (isChargingShake) {
+                mesh.position.x = (Math.random() - 0.5) * shakeIntensity; mesh.position.y = (Math.random() - 0.5) * shakeIntensity;
+                if (Math.random() > 0.85) mesh.material.opacity = 0.4 + Math.random() * 0.4;
+            } else {
+                mesh.position.x = 0; if (Math.abs(mainGroup.rotation.y - targetRotationY) < 0.01) mesh.position.y = Math.sin(Date.now() * 0.001) * 0.04;
+                mesh.material.opacity = 0.9;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
